@@ -1,39 +1,22 @@
 """
 Beam Endpoint: Real-ESRGAN x4plus
 Superresolución 4x rápida para imágenes de hogar.
-SDK: beam-sdk v0.15 (App + Runtime + rest_api)
 """
 
 import os
 import time
-import torch
 import base64
 import urllib.request
 from io import BytesIO
-from PIL import Image as PILImage
-import numpy as np
-from beam import App, Runtime, Image as BeamImage, Volume
+from beam import endpoint, Image as BeamImage, Volume
 
 CACHE_PATH = "./weights"
 MODEL_URL = "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth"
 MODEL_FILE = os.path.join(CACHE_PATH, "RealESRGAN_x4plus.pth")
 
-app = App(
-    name="beam-real-esrgan-x4plus",
-    runtime=Runtime(
-        cpu=1,
-        gpu="T4",
-        memory="16Gi",
-        image=BeamImage(
-            python_version="python3.10",
-            python_packages=["torch", "torchvision", "spandrel", "pillow", "numpy"],
-        ),
-    ),
-    volumes=[Volume(name="weights", path=CACHE_PATH)],
-)
-
 
 def load_model():
+    import torch
     if not os.path.exists(MODEL_FILE):
         os.makedirs(CACHE_PATH, exist_ok=True)
         print("Descargando pesos de RealESRGAN_x4plus...")
@@ -49,17 +32,25 @@ def load_model():
     return model
 
 
-@app.rest_api(loader=load_model)
+@endpoint(
+    name="beam-real-esrgan-x4plus",
+    on_start=load_model,
+    gpu="A10G",
+    cpu=1,
+    memory="16Gi",
+    keep_warm_seconds=60,
+    volumes=[Volume(name="weights", mount_path=CACHE_PATH)],
+    image=BeamImage(
+        python_version="python3.10",
+        python_packages=["torch", "torchvision", "spandrel", "pillow", "numpy"],
+    ),
+)
 def upscale(**inputs):
-    """
-    Escala una imagen 4x con Real-ESRGAN.
+    import torch
+    import numpy as np
+    from PIL import Image as PILImage
 
-    Inputs (JSON):
-      - image_base64 (str): imagen codificada en base64
-      - upscale_factor (int, default 4): 2 o 4
-    """
     model = upscale.get_model()
-
     image_base64 = inputs.get("image_base64", "")
     upscale_factor = int(inputs.get("upscale_factor", 4))
 

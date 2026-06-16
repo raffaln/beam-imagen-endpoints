@@ -1,39 +1,18 @@
 """
 Beam Endpoint: Z-Image-Turbo (Tongyi-MAI/Z-Image-Turbo)
 Generación de imágenes ultra-rápida con 8 pasos de diffusion.
-SDK: beam-sdk v0.15 (App + Runtime + rest_api)
 """
 
 import time
-import torch
 import base64
 from io import BytesIO
-from beam import App, Runtime, Image, Volume
+from beam import endpoint, Image, Volume
 
 CACHE_PATH = "./weights"
 
-app = App(
-    name="beam-z-image-turbo",
-    runtime=Runtime(
-        cpu=2,
-        gpu="A10G",
-        memory="16Gi",
-        image=Image(
-            python_version="python3.10",
-            python_packages=[
-                "torch==2.1.2",
-                "diffusers>=0.27.0",
-                "transformers>=4.38.0",
-                "accelerate>=0.27.0",
-                "pillow",
-                "sentencepiece",
-            ],
-        ),
-    ),
-    volumes=[Volume(name="weights", path=CACHE_PATH)],
-)
 
 def load_model():
+    import torch
     from diffusers import DiffusionPipeline
     pipe = DiffusionPipeline.from_pretrained(
         "Tongyi-MAI/Z-Image-Turbo",
@@ -44,20 +23,30 @@ def load_model():
     return pipe
 
 
-@app.rest_api(loader=load_model)
+@endpoint(
+    name="beam-z-image-turbo",
+    on_start=load_model,
+    gpu="A10G",
+    cpu=2,
+    memory="16Gi",
+    keep_warm_seconds=60,
+    volumes=[Volume(name="weights", mount_path=CACHE_PATH)],
+    image=Image(
+        python_version="python3.10",
+        python_packages=[
+            "torch==2.1.2",
+            "diffusers>=0.27.0",
+            "transformers>=4.38.0",
+            "accelerate>=0.27.0",
+            "pillow",
+            "sentencepiece",
+        ],
+    ),
+)
 def generate(**inputs):
-    """
-    Genera una imagen con Z-Image-Turbo.
+    import torch
+    import random
 
-    Inputs (JSON):
-      - prompt (str): descripción de la imagen
-      - negative_prompt (str, optional)
-      - width (int, default 1024)
-      - height (int, default 1024)
-      - steps (int, default 8)
-      - guidance (float, default 0.0)
-      - seed (int, optional)
-    """
     pipe = generate.get_model()
 
     prompt = inputs.get("prompt", "")
@@ -69,7 +58,6 @@ def generate(**inputs):
     seed = inputs.get("seed")
 
     if seed is None or seed < 0:
-        import random
         seed = random.randint(0, 2147483647)
     else:
         seed = int(seed)
@@ -77,7 +65,6 @@ def generate(**inputs):
     start_time = time.time()
     try:
         generator = torch.Generator("cuda").manual_seed(seed)
-
         image = pipe(
             prompt=prompt,
             negative_prompt=negative_prompt,
