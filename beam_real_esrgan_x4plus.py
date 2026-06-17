@@ -12,17 +12,11 @@ from beam import endpoint, Image as BeamImage, Volume
 
 CACHE_PATH = "./weights"
 MODEL_URL = "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth"
-MODEL_FILE = os.path.join(CACHE_PATH, "RealESRGAN_x4plus.pth")
+MODEL_FILE = "/weights/RealESRGAN_x4plus.pth"
 
 
 def load_model():
     import torch
-    if not os.path.exists(MODEL_FILE):
-        os.makedirs(CACHE_PATH, exist_ok=True)
-        print("Descargando pesos de RealESRGAN_x4plus...")
-        urllib.request.urlretrieve(MODEL_URL, MODEL_FILE)
-        print("Descarga completa.")
-
     from spandrel import ModelLoader
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = ModelLoader(device=device).load_from_file(MODEL_FILE)
@@ -39,10 +33,13 @@ def load_model():
     cpu=1,
     memory="16Gi",
     keep_warm_seconds=60,
-    volumes=[Volume(name="weights", mount_path=CACHE_PATH)],
     image=BeamImage(
         python_version="python3.10",
         python_packages=["torch", "torchvision", "spandrel", "pillow", "numpy"],
+        commands=[
+            "mkdir -p /weights",
+            "python3 -c 'import urllib.request; urllib.request.urlretrieve(\"https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth\", \"/weights/RealESRGAN_x4plus.pth\")'"
+        ]
     ),
 )
 def upscale(context, **inputs):

@@ -1,59 +1,62 @@
 """
-Beam Endpoint: Qwen-Image-2512
-Generación premium de imágenes de alta resolución.
+Beam Endpoint: DreamShaper v8 (lykon/dreamshaper-8)
+Modelo multipropósito de alto rendimiento basado en SD 1.5.
 """
 
 import time
 import base64
+import random
 from io import BytesIO
-from beam import endpoint, Image, Volume
+from beam import endpoint, Image
 
-CACHE_PATH = "./weights"
+CACHE_PATH = "/weights"
 
 
 def load_model():
     import torch
-    from diffusers import DiffusionPipeline
-    pipe = DiffusionPipeline.from_pretrained(
-        "Qwen/Qwen-Image-2512",
-        torch_dtype=torch.bfloat16,
+    from diffusers import StableDiffusionPipeline
+    pipe = StableDiffusionPipeline.from_pretrained(
+        "lykon/dreamshaper-8",
+        torch_dtype=torch.float16,
         cache_dir=CACHE_PATH,
+        local_files_only=True
     )
     pipe.to("cuda")
     return pipe
 
 
 @endpoint(
-    name="beam-qwen-image-2512",
+    name="beam-dreamshaper-v8",
     on_start=load_model,
-    gpu="L40S",
+    gpu="A10G",
     cpu=2,
-    memory="24Gi",
+    memory="16Gi",
     keep_warm_seconds=60,
-    volumes=[Volume(name="weights", mount_path=CACHE_PATH)],
     image=Image(
         python_version="python3.10",
         python_packages=[
-            "torch==2.1.2",
             "diffusers>=0.27.0",
             "transformers>=4.38.0",
             "accelerate>=0.27.0",
             "pillow",
             "sentencepiece",
         ],
+        commands=[
+            "mkdir -p /weights",
+            "python3 -c 'import torch; from diffusers import StableDiffusionPipeline; StableDiffusionPipeline.from_pretrained(\"lykon/dreamshaper-8\", torch_dtype=torch.float16, cache_dir=\"/weights\")'"
+        ]
     ),
 )
 def generate(context, **inputs):
     import torch
-    import random
 
     pipe = context.on_start_value
 
     prompt = inputs.get("prompt", "")
     negative_prompt = inputs.get("negative_prompt", "")
-    width = int(inputs.get("width", 1024))
-    height = int(inputs.get("height", 1024))
-    steps = int(inputs.get("steps", 20))
+    width = int(inputs.get("width", 512))
+    height = int(inputs.get("height", 512))
+    steps = int(inputs.get("steps", 25))
     guidance = inputs.get("guidance")
     seed = inputs.get("seed")
 
@@ -62,21 +65,26 @@ def generate(context, **inputs):
     else:
         seed = int(seed)
 
+    # El valor por defecto de guidance para SD 1.5 suele ser 7.0
+    if guidance is None:
+        guidance = 7.0
+    else:
+        guidance = float(guidance)
+
     start_time = time.time()
     try:
         generator = torch.Generator("cuda").manual_seed(seed)
-
+        
         pipe_kwargs = {
             "prompt": prompt,
             "width": width,
             "height": height,
             "num_inference_steps": steps,
+            "guidance_scale": guidance,
             "generator": generator,
         }
         if negative_prompt:
             pipe_kwargs["negative_prompt"] = negative_prompt
-        if guidance is not None:
-            pipe_kwargs["guidance_scale"] = float(guidance)
 
         image = pipe(**pipe_kwargs).images[0]
 
@@ -86,7 +94,7 @@ def generate(context, **inputs):
 
         return {
             "success": True,
-            "model_name": "qwen-image-2512",
+            "model_name": "dreamshaper-v8",
             "image_base64": img_str,
             "seed": seed,
             "width": width,
@@ -94,4 +102,4 @@ def generate(context, **inputs):
             "processing_time_seconds": round(time.time() - start_time, 2),
         }
     except Exception as e:
-        return {"success": False, "model_name": "qwen-image-2512", "error": str(e)}
+        return {"success": False, "model_name": "dreamshaper-v8", "error": str(e)}

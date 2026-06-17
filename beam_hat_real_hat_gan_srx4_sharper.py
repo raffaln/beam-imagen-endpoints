@@ -12,17 +12,11 @@ from beam import endpoint, Image as BeamImage, Volume
 
 CACHE_PATH = "./weights"
 MODEL_URL = "https://huggingface.co/Acly/hat/resolve/main/Real_HAT_GAN_SRx4_sharper.pth"
-MODEL_FILE = os.path.join(CACHE_PATH, "Real_HAT_GAN_SRx4_sharper.pth")
+MODEL_FILE = "/weights/Real_HAT_GAN_SRx4_sharper.pth"
 
 
 def load_model():
     import torch
-    if not os.path.exists(MODEL_FILE):
-        os.makedirs(CACHE_PATH, exist_ok=True)
-        print("Descargando pesos de Real_HAT_GAN_SRx4_sharper...")
-        urllib.request.urlretrieve(MODEL_URL, MODEL_FILE)
-        print("Descarga completa.")
-
     import spandrel_extra_arches
     spandrel_extra_arches.install()
 
@@ -42,12 +36,15 @@ def load_model():
     cpu=2,
     memory="16Gi",
     keep_warm_seconds=60,
-    volumes=[Volume(name="weights", mount_path=CACHE_PATH)],
     image=BeamImage(
         python_version="python3.10",
         python_packages=[
             "torch", "torchvision", "spandrel", "spandrel_extra_arches", "pillow", "numpy"
         ],
+        commands=[
+            "mkdir -p /weights",
+            "python3 -c 'import urllib.request; urllib.request.urlretrieve(\"https://huggingface.co/Acly/hat/resolve/main/Real_HAT_GAN_SRx4_sharper.pth\", \"/weights/Real_HAT_GAN_SRx4_sharper.pth\")'"
+        ]
     ),
 )
 def upscale(context, **inputs):
