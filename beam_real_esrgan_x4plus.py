@@ -45,12 +45,12 @@ def load_model():
         python_packages=["torch", "torchvision", "spandrel", "pillow", "numpy"],
     ),
 )
-def upscale(**inputs):
+def upscale(context, **inputs):
     import torch
     import numpy as np
     from PIL import Image as PILImage
 
-    model = upscale.get_model()
+    model = context.on_start_value
     image_base64 = inputs.get("image_base64", "")
     upscale_factor = int(inputs.get("upscale_factor", 4))
 

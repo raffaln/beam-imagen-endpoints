@@ -43,11 +43,11 @@ def load_model():
         ],
     ),
 )
-def generate(**inputs):
+def generate(context, **inputs):
     import torch
     import random
 
-    pipe = generate.get_model()
+    pipe = context.on_start_value
 
     prompt = inputs.get("prompt", "")
     negative_prompt = inputs.get("negative_prompt", "")
