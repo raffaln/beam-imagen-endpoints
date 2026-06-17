@@ -35,11 +35,15 @@ def load_model():
     image=Image(
         python_version="python3.10",
         python_packages=[
-            "diffusers>=0.27.0",
-            "transformers>=4.38.0",
-            "accelerate>=0.27.0",
+            "torch==2.1.2",
+            "torchvision==0.16.2",
+            "diffusers==0.27.2",
+            "transformers==4.38.2",
+            "accelerate==0.29.3",
+            "huggingface_hub==0.25.2",
             "pillow",
             "sentencepiece",
+            "numpy<2",
         ],
         commands=[
             "mkdir -p /weights",
