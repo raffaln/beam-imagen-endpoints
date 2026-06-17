@@ -73,6 +73,13 @@ def generate(context, **inputs):
     steps = int(inputs.get("steps", 25))
     guidance = inputs.get("guidance")
     seed = inputs.get("seed")
+    image_base64 = inputs.get("image_base64")
+    strength = inputs.get("strength")
+
+    if strength is not None:
+        strength = float(strength)
+    else:
+        strength = 0.55
 
     if seed is None or seed < 0:
         seed = random.randint(0, 2147483647)
@@ -88,18 +95,44 @@ def generate(context, **inputs):
     try:
         generator = torch.Generator("cuda").manual_seed(seed)
         
-        pipe_kwargs = {
-            "prompt": prompt,
-            "width": width,
-            "height": height,
-            "num_inference_steps": steps,
-            "guidance_scale": guidance,
-            "generator": generator,
-        }
-        if negative_prompt:
-            pipe_kwargs["negative_prompt"] = negative_prompt
+        if image_base64:
+            from diffusers import StableDiffusionImg2ImgPipeline
+            from PIL import Image as PILImage
+            import base64
+            from io import BytesIO
+            
+            if "base64," in image_base64:
+                image_base64 = image_base64.split("base64,")[1]
+            init_image = PILImage.open(BytesIO(base64.b64decode(image_base64))).convert("RGB")
+            init_image = init_image.resize((width, height))
+            
+            img2img_pipe = StableDiffusionImg2ImgPipeline(**pipe.components)
+            
+            pipe_kwargs = {
+                "prompt": prompt,
+                "image": init_image,
+                "strength": strength,
+                "num_inference_steps": steps,
+                "guidance_scale": guidance,
+                "generator": generator,
+            }
+            if negative_prompt:
+                pipe_kwargs["negative_prompt"] = negative_prompt
+                
+            image = img2img_pipe(**pipe_kwargs).images[0]
+        else:
+            pipe_kwargs = {
+                "prompt": prompt,
+                "width": width,
+                "height": height,
+                "num_inference_steps": steps,
+                "guidance_scale": guidance,
+                "generator": generator,
+            }
+            if negative_prompt:
+                pipe_kwargs["negative_prompt"] = negative_prompt
 
-        image = pipe(**pipe_kwargs).images[0]
+            image = pipe(**pipe_kwargs).images[0]
 
         buffered = BytesIO()
         image.save(buffered, format="JPEG", quality=90)
