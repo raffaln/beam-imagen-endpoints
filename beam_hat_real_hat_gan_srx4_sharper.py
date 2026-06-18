@@ -60,10 +60,9 @@ def load_model():
         model.eval()
         if cuda_ok:
             model.cuda()
-            model.half()
             
         with open(os.path.join(CACHE_PATH, "startup.log"), "a") as f:
-            f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Model loaded and compiled to GPU successfully (FP16)\n")
+            f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Model loaded and compiled to GPU successfully\n")
             
         return model
     except Exception as e:
@@ -87,9 +86,6 @@ def tiled_upscale(model, input_image, tile_size=256, tile_pad=16, scale=4):
     output_image = PILImage.new("RGB", (w * scale, h * scale))
     device = model.device
     
-    # Determinar el tipo de datos (FP16 para GPU, FP32 para CPU)
-    dtype = torch.float16 if device.type == "cuda" else torch.float32
-    
     for y in range(0, h, tile_size):
         for x in range(0, w, tile_size):
             # Calcular límites del parche de entrada con relleno
@@ -101,15 +97,14 @@ def tiled_upscale(model, input_image, tile_size=256, tile_pad=16, scale=4):
             # Recortar parche
             tile = input_image.crop((x1, y1, x2, y2))
             
-            # Inferencia del parche
+            # Inferencia del parche en float32
             img_tensor = torch.from_numpy(np.array(tile)).permute(2, 0, 1).float() / 255.0
-            img_tensor = img_tensor.unsqueeze(0).to(device, dtype=dtype)
+            img_tensor = img_tensor.unsqueeze(0).to(device)
             
             with torch.inference_mode():
                 output_tensor = model(img_tensor)
                 
-            # Convertir a float32 antes de pasar a numpy para evitar incompatibilidad
-            output_arr = output_tensor.squeeze(0).permute(1, 2, 0).clamp(0, 1).float().cpu().numpy()
+            output_arr = output_tensor.squeeze(0).permute(1, 2, 0).clamp(0, 1).cpu().numpy()
             output_arr = (output_arr * 255).round().astype(np.uint8)
             output_tile = PILImage.fromarray(output_arr)
             
