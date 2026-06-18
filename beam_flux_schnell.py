@@ -1,134 +1,110 @@
 """
-Beam Endpoint: FLUX.1 [schnell] (black-forest-labs/FLUX.1-schnell)
-Modelo de ultra-calidad comercial con licencia Apache 2.0.
+Beam serverless endpoint - FLUX.1-schnell GGUF Q4_K_S
+~6.8GB download (GGUF transformer), ~7GB VRAM, 1-4 steps, excellent quality
+Apache 2.0 license - commercial use allowed
 """
 
-import time
-import base64
-import random
-from io import BytesIO
-from beam import endpoint, Image
+from beam import Image, Volume, endpoint, Output, env
 
-CACHE_PATH = "/weights"
-
-
-def load_model():
+if env.is_remote():
+    from diffusers import FluxPipeline, FluxTransformer2DModel, GGUFQuantizationConfig
     import torch
-    from diffusers import FluxPipeline
+    from huggingface_hub import hf_hub_download
+    import os
+    import uuid
+
+image = (
+    Image(python_version="python3.11")
+    .add_python_packages(
+        [
+            "diffusers[torch]>=0.30",
+            "transformers>=4.44",
+            "huggingface_hub[hf-transfer]>=0.24",
+            "torch>=2.3",
+            "accelerate>=0.33",
+            "safetensors>=0.4",
+            "pillow>=10.0",
+            "xformers>=0.0.27",
+            "torchvision>=0.18",
+            "gguf>=0.10.0",
+        ]
+    )
+    .with_envs(
+        "HF_HUB_ENABLE_HF_TRANSFER=1",
+        "HF_HUB_DISABLE_PROGRESS_BARS=1",
+    )
+)
+
+CACHE_PATH = "./models"
+GGUF_REPO = "city96/FLUX.1-schnell-gguf"
+GGUF_FILE = "flux1-schnell-Q4_K_S.gguf"
+BASE_MODEL = "black-forest-labs/FLUX.1-schnell"
+
+
+def load_models():
+    ckpt_path = hf_hub_download(
+        repo_id=GGUF_REPO,
+        filename=GGUF_FILE,
+        cache_dir=CACHE_PATH,
+    )
+
+    transformer = FluxTransformer2DModel.from_single_file(
+        ckpt_path,
+        quantization_config=GGUFQuantizationConfig(compute_dtype=torch.bfloat16),
+        torch_dtype=torch.bfloat16,
+        disable_mmap=True,
+    )
+
     pipe = FluxPipeline.from_pretrained(
-        "black-forest-labs/FLUX.1-schnell",
+        BASE_MODEL,
+        transformer=transformer,
         torch_dtype=torch.bfloat16,
         cache_dir=CACHE_PATH,
-        local_files_only=True
     )
+
     pipe.to("cuda")
+    pipe.enable_model_cpu_offload()
+    pipe.enable_attention_slicing("max")
+
     return pipe
 
 
 @endpoint(
-    name="beam-flux-schnell",
-    on_start=load_model,
-    gpu="A10G",
+    name="flux-schnell-gguf",
+    image=image,
+    on_start=load_models,
+    keep_warm_seconds=300,
     cpu=2,
-    memory="32Gi",
-    keep_warm_seconds=60,
-    image=Image(
-        python_version="python3.10",
-        python_packages=[
-            "torch==2.1.2",
-            "torchvision==0.16.2",
-            "diffusers==0.27.2",
-            "transformers==4.38.2",
-            "accelerate==0.29.3",
-            "huggingface_hub==0.25.2",
-            "pillow",
-            "sentencepiece",
-            "protobuf",
-            "numpy<2",
-        ],
-        commands=[
-            "mkdir -p /weights",
-            "python3 -c 'import torch; from diffusers import FluxPipeline; FluxPipeline.from_pretrained(\"black-forest-labs/FLUX.1-schnell\", torch_dtype=torch.bfloat16, cache_dir=\"/weights\")'"
-        ]
-    ),
+    memory="16Gi",
+    gpu="A10G",
+    volumes=[Volume(name="models", mount_path=CACHE_PATH)],
 )
-def generate(context, **inputs):
-    import torch
+def generate(context, prompt=None, width=1024, height=1024, steps=4, guidance=3.5):
+    if prompt is None:
+        return {"error": "prompt is required"}
 
     pipe = context.on_start_value
 
-    prompt = inputs.get("prompt", "")
-    width = int(inputs.get("width", 1024))
-    height = int(inputs.get("height", 1024))
-    steps = int(inputs.get("steps", 4))
-    seed = inputs.get("seed")
-    image_base64 = inputs.get("image_base64")
-    strength = inputs.get("strength")
-
-    if strength is not None:
-        strength = float(strength)
-    else:
-        strength = 0.55
-
-    if seed is None or seed < 0:
-        seed = random.randint(0, 2147483647)
-    else:
-        seed = int(seed)
-
-    start_time = time.time()
-    try:
+    seed = context.get("seed", None)
+    generator = None
+    if seed is not None:
         generator = torch.Generator("cuda").manual_seed(seed)
-        
-        # Flux Schnell se diseñó para guidance_scale = 0.0 o 1.0 (distillado)
-        guidance_scale = 0.0
 
-        if image_base64:
-            from diffusers import FluxImg2ImgPipeline
-            from PIL import Image as PILImage
-            import base64
-            from io import BytesIO
-            
-            if "base64," in image_base64:
-                image_base64 = image_base64.split("base64,")[1]
-            init_image = PILImage.open(BytesIO(base64.b64decode(image_base64))).convert("RGB")
-            init_image = init_image.resize((width, height))
-            
-            img2img_pipe = FluxImg2ImgPipeline(**pipe.components)
-            
-            pipe_kwargs = {
-                "prompt": prompt,
-                "image": init_image,
-                "strength": strength,
-                "num_inference_steps": steps,
-                "guidance_scale": guidance_scale,
-                "generator": generator,
-            }
-                
-            image = img2img_pipe(**pipe_kwargs).images[0]
-        else:
-            pipe_kwargs = {
-                "prompt": prompt,
-                "width": width,
-                "height": height,
-                "num_inference_steps": steps,
-                "guidance_scale": guidance_scale,
-                "generator": generator,
-            }
+    result = pipe(
+        prompt=prompt,
+        width=width,
+        height=height,
+        num_inference_steps=steps,
+        guidance_scale=guidance,
+        generator=generator,
+        output_type="pil",
+    ).images[0]
 
-            image = pipe(**pipe_kwargs).images[0]
+    output = Output.from_pil_image(result).save()
+    url = output.public_url()
 
-        buffered = BytesIO()
-        image.save(buffered, format="JPEG", quality=90)
-        img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
-
-        return {
-            "success": True,
-            "model_name": "flux-schnell",
-            "image_base64": img_str,
-            "seed": seed,
-            "width": width,
-            "height": height,
-            "processing_time_seconds": round(time.time() - start_time, 2),
-        }
-    except Exception as e:
-        return {"success": False, "model_name": "flux-schnell", "error": str(e)}
+    return {
+        "image_url": url,
+        "model": "FLUX.1-schnell GGUF Q4",
+        "seed": seed,
+    }
