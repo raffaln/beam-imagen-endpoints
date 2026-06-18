@@ -6,6 +6,7 @@ Superresolución premium 4x con máximo detalle.
 import os
 import time
 import base64
+import traceback
 from io import BytesIO
 from beam import endpoint, Image as BeamImage, Volume
 
@@ -15,25 +16,61 @@ MODEL_FILE = "Real_HAT_GAN_sharper.pth"
 
 
 def load_model():
-    import torch
-    import spandrel_extra_arches
-    spandrel_extra_arches.install()
-    from huggingface_hub import hf_hub_download
+    # Asegurar que la carpeta cache exista para los logs
+    os.makedirs(CACHE_PATH, exist_ok=True)
+    
+    try:
+        with open(os.path.join(CACHE_PATH, "startup.log"), "a") as f:
+            f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] load_model started\n")
+            
+        import torch
+        import spandrel_extra_arches
+        
+        with open(os.path.join(CACHE_PATH, "startup.log"), "a") as f:
+            f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] spandrel_extra_arches imported. Installing extra arches...\n")
+            
+        spandrel_extra_arches.install()
+        
+        with open(os.path.join(CACHE_PATH, "startup.log"), "a") as f:
+            f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] spandrel_extra_arches.install() completed\n")
+            
+        from huggingface_hub import hf_hub_download
 
-    # Descarga robusta usando hf_hub_download con caché persistente
-    model_path = hf_hub_download(
-        repo_id=MODEL_REPO,
-        filename=MODEL_FILE,
-        cache_dir=CACHE_PATH,
-    )
+        model_path = hf_hub_download(
+            repo_id=MODEL_REPO,
+            filename=MODEL_FILE,
+            cache_dir=CACHE_PATH,
+        )
+        
+        with open(os.path.join(CACHE_PATH, "startup.log"), "a") as f:
+            f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Model weights resolved at {model_path}\n")
 
-    from spandrel import ModelLoader
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = ModelLoader(device=device).load_from_file(model_path)
-    model.eval()
-    if torch.cuda.is_available():
-        model.cuda()
-    return model
+        from spandrel import ModelLoader
+        
+        # Verificar estado de CUDA
+        cuda_ok = torch.cuda.is_available()
+        device_str = "cuda" if cuda_ok else "cpu"
+        device = torch.device(device_str)
+        
+        with open(os.path.join(CACHE_PATH, "startup.log"), "a") as f:
+            f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] CUDA Available: {cuda_ok}, using device: {device_str}\n")
+            
+        model = ModelLoader(device=device).load_from_file(model_path)
+        model.eval()
+        if cuda_ok:
+            model.cuda()
+            
+        with open(os.path.join(CACHE_PATH, "startup.log"), "a") as f:
+            f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Model loaded and compiled to GPU successfully\n")
+            
+        return model
+    except Exception as e:
+        err_msg = traceback.format_exc()
+        with open(os.path.join(CACHE_PATH, "startup_error.log"), "w") as f:
+            f.write(err_msg)
+        with open(os.path.join(CACHE_PATH, "startup.log"), "a") as f:
+            f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] CRASH: {str(e)}\n")
+        raise e
 
 
 @endpoint(
