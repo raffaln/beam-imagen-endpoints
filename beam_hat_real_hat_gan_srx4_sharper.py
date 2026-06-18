@@ -74,7 +74,7 @@ def load_model():
         raise e
 
 
-def tiled_upscale(model, input_image, tile_size=256, tile_pad=16, scale=4):
+def tiled_upscale(model, input_image, tile_size=512, tile_pad=16, scale=4):
     """
     Reescala la imagen por parches (tiles) para evitar errores de falta de memoria CUDA (OOM).
     """
@@ -124,11 +124,22 @@ def tiled_upscale(model, input_image, tile_size=256, tile_pad=16, scale=4):
             # Pegar el resultado en el lienzo final
             output_image.paste(cropped_tile, (x * scale, y * scale))
             
-            # Limpiar memoria de CUDA intermedia
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
+    # Limpiar memoria de CUDA al finalizar todo el reescalado
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
                 
     return output_image
+
+
+image_config = (
+    BeamImage(python_version="python3.10")
+    .add_python_packages([
+        "torch>=2.3,<2.6", "torchvision", "spandrel", "spandrel_extra_arches", "pillow", "numpy", "huggingface_hub"
+    ])
+    .with_envs(
+        "GUNICORN_CMD_ARGS=\"-t 600\"",
+    )
+)
 
 
 @endpoint(
@@ -139,12 +150,7 @@ def tiled_upscale(model, input_image, tile_size=256, tile_pad=16, scale=4):
     memory="16Gi",
     keep_warm_seconds=60,
     volumes=[Volume(name="weights", mount_path=CACHE_PATH)],
-    image=BeamImage(
-        python_version="python3.10",
-        python_packages=[
-            "torch>=2.3,<2.6", "torchvision", "spandrel", "spandrel_extra_arches", "pillow", "numpy", "huggingface_hub"
-        ]
-    ),
+    image=image_config,
 )
 def upscale(context, **inputs):
     import torch
